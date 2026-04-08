@@ -4,7 +4,8 @@
  */
 declare global {
 	interface Env {
-		// Add environment variables here as needed
+		ALLOWED_TARGET_HOSTS?: string;
+		DEBUG_REQUEST_LOGS?: string;
 	}
 }
 
