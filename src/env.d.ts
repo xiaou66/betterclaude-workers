@@ -1,6 +1,7 @@
 /**
- * Environment interface
- * These should be set as secrets via `wrangler secret put`
+ * Shared runtime environment variable names.
+ * Cloudflare reads them from Wrangler-provided bindings.
+ * EdgeOne and ESA read equivalent string values from their own runtime environment.
  */
 declare global {
 	interface Env {

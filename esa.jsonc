@@ -1,0 +1,6 @@
+{
+	"name": "betterclaude-workers",
+	"entry": "./src/esa.ts",
+	"installCommand": "npm install",
+	"buildCommand": ""
+}

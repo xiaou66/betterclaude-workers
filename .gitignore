@@ -32,4 +32,6 @@ Thumbs.db
 .env
 .edgeone/*
 .tef_dist/*
-  
+
+# Alibaba Cloud ESA
+.dev/*

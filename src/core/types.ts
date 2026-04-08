@@ -1,6 +1,6 @@
 export interface AppContext {
 	request: Request;
-	platform: 'cloudflare' | 'edgeone';
+	platform: 'cloudflare' | 'edgeone' | 'esa';
 	env: Record<string, string | undefined>;
 	waitUntil?: (promise: Promise<unknown>) => void;
 }

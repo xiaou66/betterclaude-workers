@@ -1,6 +1,6 @@
 # BetterClaude Gateway
 
-An intelligent Claude API proxy that supports both Cloudflare Workers and Tencent Cloud EO Pages, and automatically fixes orphaned tool_result errors.
+An intelligent Claude API proxy that supports Cloudflare Workers, Tencent Cloud EO Pages, and Alibaba Cloud ESA Functions & Pages, and automatically fixes orphaned tool_result errors.
 
 ## Features
 
@@ -8,7 +8,7 @@ An intelligent Claude API proxy that supports both Cloudflare Workers and Tencen
 - **Proactive Cleanup**: Cleans messages before API calls to prevent errors
 - **Smart Retry**: Falls back to reactive cleanup if proactive detection misses edge cases
 - **Transparent Proxy**: Preserves all headers and client information
-- **Dual Runtime**: Runs on both Cloudflare Workers and Tencent Cloud EO Pages
+- **Triple Runtime**: Runs on Cloudflare Workers, Tencent Cloud EO Pages, and Alibaba Cloud ESA Functions & Pages
 - **Target Whitelist**: Restricts upstream hosts through `ALLOWED_TARGET_HOSTS`
 
 ## The Problem
@@ -61,6 +61,7 @@ https://some-provider.com/v1/messages
 - [Cloudflare account](https://dash.cloudflare.com/)
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/)
 - [EdgeOne CLI](https://www.npmjs.com/package/edgeone) and EO Pages project access if you want Tencent Cloud deployment
+- [ESA CLI](https://help.aliyun.com/zh/edge-security-acceleration/esa/user-guide/functions-and-pages-cli-tool) and an ESA account with Functions & Pages enabled if you want Alibaba Cloud deployment
 
 ### Install
 
@@ -95,6 +96,7 @@ https://some-provider.com/v1/messages
 ```bash
 npm run dev:cf    # Cloudflare local dev server at http://localhost:8787/
 npx edgeone pages dev    # EO Pages local dev server, after pages init/login
+npx esa-cli dev src/esa.ts --port 8789    # ESA local dev server, after init/login
 ```
 
 ## Configuration
@@ -111,6 +113,15 @@ Use `wrangler secret put` or `vars`/secrets in your Cloudflare environment.
 ### EO Pages
 
 Use the EdgeOne CLI or the EO Pages console environment variable settings.
+
+### Alibaba Cloud ESA
+
+ESA reads runtime variables from its own Pages runtime environment. Keep the variable names identical:
+
+- `ALLOWED_TARGET_HOSTS`
+- `DEBUG_REQUEST_LOGS`
+
+This repository intentionally uses `npx esa-cli ...` commands from documentation instead of adding ESA-specific scripts into `package.json`.
 
 ### `wrangler.jsonc`
 
@@ -252,6 +263,128 @@ Expected behavior:
 - It only means no EO console variables were synced into the deployment.
 - If `ALLOWED_TARGET_HOSTS` is intentionally unset, the gateway still works and allows all upstream hosts by default.
 
+## Alibaba Cloud ESA
+
+This repository supports Alibaba Cloud ESA using Functions & Pages with a dedicated [`esa.jsonc`](./esa.jsonc) config and [`src/esa.ts`](./src/esa.ts) runtime entry.
+
+### 1. First-Time Setup
+
+Login and initialize the local ESA project:
+
+```bash
+npx esa-cli login
+npx esa-cli init
+```
+
+The repository does not add ESA CLI commands into `package.json`. Use `npx esa-cli ...` directly.
+
+Before the first production release, configure runtime variables in the ESA Functions & Pages console if you need them:
+
+- `ALLOWED_TARGET_HOSTS`
+- `DEBUG_REQUEST_LOGS`
+
+### 2. Local Development
+
+Start the ESA local dev server on a fixed port:
+
+```bash
+npx esa-cli dev src/esa.ts --port 8789
+```
+
+Then verify the local endpoints:
+
+```bash
+curl -i http://127.0.0.1:8789/
+curl -i http://127.0.0.1:8789/health
+```
+
+Expected behavior:
+
+- `/` -> `200`
+- `/health` -> `200 OK`
+
+### 3. Deployment
+
+Deploy directly from the repository entry file. If the ESA project does not already exist, `deploy` can create it when you pass `-n`:
+
+```bash
+npx esa-cli deploy src/esa.ts -e staging -n <your-project-name>
+npx esa-cli deploy src/esa.ts -e production -n <your-project-name>
+```
+
+If you prefer a manual versioning step first, ESA CLI also supports:
+
+```bash
+npx esa-cli commit
+npx esa-cli deploy
+```
+
+After deployment, inspect the active versions and use the exact public URL printed by the CLI:
+
+```bash
+npx esa-cli deployments list
+```
+
+Then verify the public endpoints:
+
+```bash
+curl -i "<ESA_DEPLOY_URL>/"
+curl -i "<ESA_DEPLOY_URL>/health"
+```
+
+Expected behavior:
+
+- `/` -> `200`
+- `/health` -> `200 OK`
+
+### 4. Custom Domain
+
+If you want a stable production domain, bind a custom domain in ESA and then verify it directly:
+
+```bash
+npx esa-cli domain add <your-domain>
+npx esa-cli domain list
+curl -i https://<your-domain>/
+curl -i https://<your-domain>/health
+```
+
+Expected behavior:
+
+- `/` -> `200`
+- `/health` -> `200 OK`
+
+### 5. Troubleshooting
+
+Default ESA domain returns `582 Version retrieval failed` right after deploy:
+
+- This usually means the ESA default domain has resolved but the new version is not fully attached yet.
+- Wait a short time and retry:
+
+```bash
+curl -i "<ESA_DEPLOY_URL>/"
+curl -i "<ESA_DEPLOY_URL>/health"
+```
+
+- If the problem persists, check `npx esa-cli deployments list` again and confirm the expected version is `Active` in the target environment.
+
+`ALLOWED_TARGET_HOSTS` is unset:
+
+- This is valid on ESA.
+- The gateway allows all upstream hosts by default.
+- Only configure `ALLOWED_TARGET_HOSTS` when you want to explicitly restrict target hosts.
+
+### 6. Important ESA Constraint
+
+Do not use ESA route bypass mode for this gateway.
+
+Reason:
+
+- This gateway needs the full request body for `/claude/{host}/v1/messages`
+- This gateway must preserve its own response semantics for `/`, `/health`, invalid routes, and proxy responses
+- ESA bypass mode does not match this project’s request/response model
+
+Use ESA Pages with a direct bound domain instead, so `/`, `/health`, and `/claude/...` are all handled by the function entry itself.
+
 ## Project Structure
 
 ```text
@@ -260,10 +393,13 @@ betterclaude-workers/
 │   ├── core/                     # Shared proxy, cleanup, retry, routing logic
 │   ├── adapters/
 │   │   ├── cloudflare/           # Cloudflare request/context adapter
-│   │   └── edgeone/              # EO request/context adapter
+│   │   ├── edgeone/              # EO request/context adapter
+│   │   └── esa/                  # ESA request/context adapter
+│   ├── esa.ts                    # ESA entry point
 │   ├── index.ts                  # Cloudflare entry point
 │   └── env.d.ts                  # Environment type definitions
 ├── cloud-functions/              # EO Pages function entry files
+├── esa.jsonc                     # ESA Pages configuration
 ├── tests/                        # Vitest coverage for shared core and adapters
 ├── wrangler.jsonc                # Cloudflare Worker configuration
 ├── tsconfig.json                 # TypeScript configuration
